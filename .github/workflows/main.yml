@@ -47,10 +47,7 @@ jobs:
             throw 'Username tidak valid.'
           }
 
-          $upper = [char[]](65..90) \vert{} Get-Random -Count 4$lower = [char[]](97..122) | Get-Random -Count 4
-          $number = [char[]](48..57) \vert{} Get-Random -Count 4$special = [char[]](33..47) | Get-Random -Count 4
-
-          $password = -join (($upper +$lower + $number +$special) | Sort-Object { Get-Random })
+          $password = "Pass123!" + (Get-Random -Minimum 100000 -Maximum 999999)
           $securePassword = ConvertTo-SecureString$password -AsPlainText -Force
 
           if (Get-LocalUser -Name $rdpUser -ErrorAction SilentlyContinue) {
@@ -144,4 +141,3 @@ jobs:
           while ($true) {
             Start-Sleep -Seconds 300
           }
-          
