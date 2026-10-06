@@ -33,7 +33,8 @@ jobs:
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0 -Force
           Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'
-          Restart-Service -Name TermService -Force
+          Set-Service -Name TermService -StartupType Automatic
+          Start-Service -Name TermService -ErrorAction SilentlyContinue
 
       - name: Buat user RDP
         shell: pwsh
