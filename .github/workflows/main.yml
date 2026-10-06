@@ -70,7 +70,7 @@ jobs:
             throw 'Secret NGROK_AUTH_TOKEN belum dibuat di GitHub Secrets!'
           }
 
-          $url = 'https://bin.equinox.io/c/bNyA1LuGUVY/ngrok-v3-stable-windows-amd64.zip'
+          $url = 'https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip'
           $zip = Join-Path -Path($env:TEMP) -ChildPath('ngrok.zip')
           
           Invoke-WebRequest -Uri($url) -OutFile($zip)
