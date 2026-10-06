@@ -1,4 +1,4 @@
-name: RDP Telegram
+name: RDP Telegram (Ngrok)
 
 on:
   workflow_dispatch:
@@ -42,7 +42,7 @@ jobs:
           INPUT_USERNAME: ${{ inputs.username }}
         run: |
           $rdpUser = "$env:INPUT_USERNAME".Trim()
-          if ([string]::IsNullOrWhiteSpace($rdpUser)) { $rdpUser = "RdpTpyo" }
+          if ([string]::IsNullOrWhiteSpace($rdpUser)) {$rdpUser = "RdpTpyo" }
 
           $rand = Get-Random -Minimum 100000 -Maximum 999999
           $password = "Pass123!" + "$rand"
@@ -61,61 +61,63 @@ jobs:
           Add-Content -Path($env:GITHUB_ENV) -Value("RDP_USERNAME=$rdpUser")
           Add-Content -Path($env:GITHUB_ENV) -Value("RDP_PASSWORD=$password")
 
-      - name: Install Tailscale
-        shell: pwsh
-        run: |
-          $url = 'https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi'
-          $installer = Join-Path -Path($env:TEMP) -ChildPath('tailscale.msi')
-
-          Invoke-WebRequest -Uri($url) -OutFile($installer)
-          Start-Process -FilePath('msiexec.exe') -ArgumentList('/i', $installer, '/quiet', '/norestart') -Wait
-          Remove-Item -Path($installer) -Force
-
-      - name: Hubungkan Tailscale
+      - name: Install & Hubungkan Ngrok
         shell: pwsh
         env:
-          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:TAILSCALE_AUTH_KEY)) {
-            throw 'Secret TAILSCALE_AUTH_KEY belum dibuat.'
+          if ([string]::IsNullOrWhiteSpace($env:NGROK_AUTH_TOKEN)) {
+            throw 'Secret NGROK_AUTH_TOKEN belum dibuat di GitHub Secrets!'
           }
 
-          $tailscale = Join-Path -Path($env:ProgramFiles) -ChildPath('Tailscale\tailscale.exe')
-          & $tailscale up --authkey="$env:TAILSCALE_AUTH_KEY" --hostname="rdp-$env:GITHUB_RUN_ID"
+          $url = 'https://bin.equinox.io/c/bNyA1LuGUVY/ngrok-v3-stable-windows-amd64.zip'
+          $zip = Join-Path -Path($env:TEMP) -ChildPath('ngrok.zip')
+          
+          Invoke-WebRequest -Uri($url) -OutFile($zip)
+          Expand-Archive -Path($zip) -DestinationPath($env:TEMP) -Force
 
-          $ip = $null
-          for ($i = 1; $i -le 12; $i++) {
-            $ipRaw = & $tailscale ip -4
-            if ($ipRaw) {
-              $ip = "$ipRaw".Trim()
-            }
-            if ($ip -match '^\d{1,3}(\.\d{1,3}){3}$') {
-              break
-            }
-            Start-Sleep -Seconds 5
+          $ngrok = Join-Path -Path($env:TEMP) -ChildPath('ngrok.exe')
+          & $ngrok config add-authtoken "$env:NGROK_AUTH_TOKEN"
+          
+          Start-Process -FilePath($ngrok) -ArgumentList('tcp 3389')
+
+          $hostPort =$null
+          for ($i = 1; $i -le 10; $i++) {
+            Start-Sleep -Seconds 3
+            try {
+              $tunnels = Invoke-RestMethod -Uri('http://127.0.0.1:4040/api/tunnels') -ErrorAction SilentlyContinue
+              if ($tunnels -and$tunnels.tunnels) {
+                $publicUrl =$tunnels.tunnels[0].public_url
+                if ($publicUrl) {
+                  $hostPort =$publicUrl -replace 'tcp://', ''
+                  break
+                }
+              }
+            } catch {}
           }
 
-          if ($ip -notmatch '^\d{1,3}(\.\d{1,3}){3}$') {
-            throw 'IP Tailscale tidak ditemukan.'
+          if ([string]::IsNullOrWhiteSpace($hostPort)) {
+            throw 'Gagal mendapatkan URL Ngrok. Cek NGROK_AUTH_TOKEN kamu.'
           }
 
-          Write-Host("::add-mask::$ip")
-          Add-Content -Path($env:GITHUB_ENV) -Value("TAILSCALE_IP=$ip")
+          $parts =$hostPort.Split(':')
+          $ngrokHost =$parts[0]
+          $ngrokPort =$parts[1]
 
-      - name: Cek koneksi RDP
-        shell: pwsh
-        run: |
-          $result = Test-NetConnection -ComputerName("$env:TAILSCALE_IP") -Port 3389 -WarningAction SilentlyContinue
-          if (-not $result.TcpTestSucceeded) {
-            throw 'Port RDP tidak dapat diakses.'
-          }
+          Write-Host("::add-mask::$ngrokHost")
+          Write-Host("::add-mask::$ngrokPort")
+          Add-Content -Path($env:GITHUB_ENV) -Value("NGROK_HOST=$ngrokHost")
+          Add-Content -Path($env:GITHUB_ENV) -Value("NGROK_PORT=$ngrokPort")
+          Add-Content -Path($env:GITHUB_ENV) -Value("NGROK_FULL=$hostPort")
 
       - name: Kirim akses ke Telegram
         shell: pwsh
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          IP: ${{ env.TAILSCALE_IP }}
+          HOST: ${{ env.NGROK_HOST }}
+          PORT: ${{ env.NGROK_PORT }}
+          FULL: ${{ env.NGROK_FULL }}
           USERNAME: ${{ env.RDP_USERNAME }}
           PASSWORD: ${{ env.RDP_PASSWORD }}
           OS_NAME: ${{ inputs.os_choice || 'windows-2022' }}
@@ -127,12 +129,12 @@ jobs:
             throw 'Secret TELEGRAM_CHAT_ID belum dibuat.'
           }
 
-          $message = "<b>🖥 RDP WINDOWS AKTIF</b>`n`n" +
+          $message = "<b>🖥 RDP WINDOWS (NGROK) AKTIF</b>`n`n" +
                      "<b>OS:</b> $env:OS_NAME`n" +
-                     "<b>IP:</b> <code>$env:IP</code>`n" +
+                     "<b>PC Name / Host:</b> <code>$env:FULL</code>`n" +
                      "<b>Username:</b> <code>$env:USERNAME</code>`n" +
-                     "<b>Password:</b> <code>$env:PASSWORD</code>`n" +
-                     "<b>Port:</b> <code>3389</code>`n`n" +
+                     "<b>Password:</b> <code>$env:PASSWORD</code>`n`n" +
+                     "💡 <i>Langsung copas isi <b>PC Name</b> di RD Client HP dengan: <code>$env:FULL</code> (tanpa VPN lagi)</i>`n`n" +
                      "<b>🕹 Perintah Bot:</b>`n" +
                      "• <code>/status</code> - Cek status RDP`n" +
                      "• <code>/stop</code> - Matikan RDP"
@@ -168,26 +170,21 @@ jobs:
                       $uptime = (Get-Date) - $startTime
                       $hours = [math]::Floor($uptime.TotalHours)
                       $mins = $uptime.Minutes
-                      $reply = "🟢 <b>Status RDP:</b> Online`n⏰ <b>Uptime:</b> ${hours} jam${mins} menit"
+                      $reply = "🟢 <b>Status RDP:</b> Online (Ngrok)`n⏰ <b>Uptime:</b> ${hours} jam${mins} menit"
                       $body = @{ chat_id = $chatId; text =$reply; parse_mode = 'HTML' }
                       $null = Invoke-RestMethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage") -Method Post -Body $body
-                     }
-                   if ($text -eq "/start") {
-                     $reply = "<b>Command Menu:\n/status Melihat status\n/stop or /off mematikan Server"
-                     $body = @{ chat_id = $chatId; text=$reply; pasre_mode = 'HTML' }
-                     $null = Invoke-RestNethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage") -Method Post -Body $body
-                     }
-                  elseif ($text -eq "/stop" -or $text -eq "/off") {
-                     $reply = "🛑 <b>RDP Berhasil Dimatikan!</b>"
-                     $body = @{ chat_id = $chatId; text =$reply; parse_mode = 'HTML' }
-                     $null = Invoke-RestMethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage") -Method Post -Body $body
-                     exit 0
+                    }
+                    elseif ($text -eq "/stop" -or $text -eq "/off") {
+                      $reply = "🛑 <b>RDP Berhasil Dimatikan!</b>"
+                      $body = @{ chat_id = $chatId; text =$reply; parse_mode = 'HTML' }
+                      $null = Invoke-RestMethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage") -Method Post -Body $body
+                      exit 0
                     }
                   }
                 }
               }
             } catch {
-              # Abaikan error sejenak jika koneksi kedip
+              # Abaikan error sejenak
             }
             Start-Sleep -Seconds 3
           }
