@@ -41,23 +41,23 @@ jobs:
         env:
           INPUT_USERNAME: ${{ inputs.username }}
         run: |
-          $rdpUser = if ([string]::IsNullOrWhiteSpace($env:INPUT_USERNAME)) { "RDP" } else { $env:INPUT_USERNAME }
-
-          if ($rdpUser -notmatch '^[a-zA-Z0-9_-]{3,20}$') {
-            throw 'Username tidak valid.'
+          $rdpUser =$env:INPUT_USERNAME
+          if ([string]::IsNullOrWhiteSpace($rdpUser)) {$rdpUser = "RDP"
           }
 
           $rand = Get-Random -Minimum 100000 -Maximum 999999
           $password = "Pass123!" + $rand
+          $secPass = ConvertTo-SecureString -String$password -AsPlainText -Force
 
-          net user $rdpUser$password /add /expires:never
-          net localgroup "Remote Desktop Users" $rdpUser /add
-          net localgroup "Administrators" $rdpUser /add
+          New-LocalUser -Name $rdpUser -Password$secPass -AccountNeverExpires -PasswordNeverExpires -ErrorAction SilentlyContinue
+
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $rdpUser -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Administrators" -Member $rdpUser -ErrorAction SilentlyContinue
 
           Write-Host "::add-mask::$password"
 
-          Add-Content -Path $env:GITHUB_ENV -Value "RDP_USERNAME=$rdpUser" -Encoding utf8
-          Add-Content -Path $env:GITHUB_ENV -Value "RDP_PASSWORD=$password" -Encoding utf8
+          Add-Content -Path $env:GITHUB_ENV -Value "RDP_USERNAME=$rdpUser"
+          Add-Content -Path $env:GITHUB_ENV -Value "RDP_PASSWORD=$password"
 
       - name: Install Tailscale
         shell: pwsh
@@ -98,7 +98,7 @@ jobs:
           }
 
           Write-Host "::add-mask::$ip"
-          Add-Content -Path $env:GITHUB_ENV -Value "TAILSCALE_IP=$ip" -Encoding utf8
+          Add-Content -Path $env:GITHUB_ENV -Value "TAILSCALE_IP=$ip"
 
       - name: Cek koneksi RDP
         shell: pwsh
