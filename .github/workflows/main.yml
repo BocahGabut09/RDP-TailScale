@@ -41,23 +41,28 @@ jobs:
         env:
           INPUT_USERNAME: ${{ inputs.username }}
         run: |
-          $rdpUser =$env:INPUT_USERNAME
-          if ([string]::IsNullOrWhiteSpace($rdpUser)) {$rdpUser = "RDP"
+          $rdpUser = if ([string]::IsNullOrWhiteSpace($env:INPUT_USERNAME)) { "RDP" } else { $env:INPUT_USERNAME }
+
+          if ($rdpUser -notmatch '^[a-zA-Z0-9_-]{3,20}$') {
+            throw 'Username tidak valid.'
           }
 
           $rand = Get-Random -Minimum 100000 -Maximum 999999
           $password = "Pass123!" + $rand
-          $secPass = ConvertTo-SecureString -String$password -AsPlainText -Force
+          $securePassword = ConvertTo-SecureString -String$password -AsPlainText -Force
 
-          New-LocalUser -Name $rdpUser -Password$secPass -AccountNeverExpires -PasswordNeverExpires -ErrorAction SilentlyContinue
+          if (Get-LocalUser -Name $rdpUser -ErrorAction SilentlyContinue) {
+            Remove-LocalUser -Name $rdpUser
+          }
 
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $rdpUser -ErrorAction SilentlyContinue
-          Add-LocalGroupMember -Group "Administrators" -Member $rdpUser -ErrorAction SilentlyContinue
+          New-LocalUser -Name $rdpUser -Password $securePassword -AccountNeverExpires -PasswordNeverExpires
+          Add-LocalGroupMember -Group 'Remote Desktop Users' -Member $rdpUser
+          Add-LocalGroupMember -Group 'Administrators' -Member $rdpUser
 
           Write-Host "::add-mask::$password"
 
-          Add-Content -Path $env:GITHUB_ENV -Value "RDP_USERNAME=$rdpUser"
-          Add-Content -Path $env:GITHUB_ENV -Value "RDP_PASSWORD=$password"
+          Add-Content -Path $env:GITHUB_ENV -Value "RDP_USERNAME=$rdpUser" -Encoding utf8
+          Add-Content -Path $env:GITHUB_ENV -Value "RDP_PASSWORD=$password" -Encoding utf8
 
       - name: Install Tailscale
         shell: pwsh
@@ -98,7 +103,7 @@ jobs:
           }
 
           Write-Host "::add-mask::$ip"
-          Add-Content -Path $env:GITHUB_ENV -Value "TAILSCALE_IP=$ip"
+          Add-Content -Path $env:GITHUB_ENV -Value "TAILSCALE_IP=$ip" -Encoding utf8
 
       - name: Cek koneksi RDP
         shell: pwsh
@@ -140,4 +145,3 @@ jobs:
           while ($true) {
             Start-Sleep -Seconds 300
           }
-          
