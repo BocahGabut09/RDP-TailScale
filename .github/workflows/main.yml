@@ -42,7 +42,7 @@ jobs:
           INPUT_USERNAME: ${{ inputs.username }}
         run: |
           $rdpUser = "$env:INPUT_USERNAME".Trim()
-          if ([string]::IsNullOrWhiteSpace($rdpUser)) {$rdpUser = "RdpTpyo" }
+          if ([string]::IsNullOrWhiteSpace($rdpUser)) { $rdpUser = "RdpTpyo" }
 
           $rand = Get-Random -Minimum 100000 -Maximum 999999
           $password = "Pass123!" + "$rand"
@@ -83,9 +83,9 @@ jobs:
           $tailscale = Join-Path -Path($env:ProgramFiles) -ChildPath('Tailscale\tailscale.exe')
           & $tailscale up --authkey="$env:TAILSCALE_AUTH_KEY" --hostname="rdp-$env:GITHUB_RUN_ID"
 
-          $ip =$null
+          $ip = $null
           for ($i = 1; $i -le 12; $i++) {
-            $ipRaw = &$tailscale ip -4
+            $ipRaw = & $tailscale ip -4
             if ($ipRaw) {
               $ip = "$ipRaw".Trim()
             }
@@ -127,19 +127,63 @@ jobs:
             throw 'Secret TELEGRAM_CHAT_ID belum dibuat.'
           }
 
-          $message = "RDP AKTIF`n`nOS: $env:OS_NAME`nIP: $env:IP`nUsername: $env:USERNAME`nPassword: $env:PASSWORD`nPort: 3389"
+          $message = "<b>🖥 RDP WINDOWS AKTIF</b>`n`n" +
+                     "<b>OS:</b> $env:OS_NAME`n" +
+                     "<b>IP:</b> <code>$env:IP</code>`n" +
+                     "<b>Username:</b> <code>$env:USERNAME</code>`n" +
+                     "<b>Password:</b> <code>$env:PASSWORD</code>`n" +
+                     "<b>Port:</b> <code>3389</code>`n`n" +
+                     "<b>🕹 Perintah Bot:</b>`n" +
+                     "• <code>/status</code> - Cek status RDP`n" +
+                     "• <code>/stop</code> - Matikan RDP"
 
           $body = @{
             chat_id = $env:CHAT_ID
             text = $message
+            parse_mode = 'HTML'
           }
 
           $null = Invoke-RestMethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage") -Method Post -Body $body -TimeoutSec 30
 
-      - name: Pertahankan RDP aktif
+      - name: Pertahankan RDP aktif & Bot Listener
         shell: pwsh
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
+          $offset = 0
+          $startTime = Get-Date
+
           while ($true) {
-            Start-Sleep -Seconds 300
+            try {
+              $updates = Invoke-RestMethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/getUpdates?offset=$offset&timeout=5") -Method Get -TimeoutSec 10
+              if ($updates.ok -and $updates.result.Count -gt 0) {
+                foreach ($update in $updates.result) {
+                  $offset = $update.update_id + 1
+                  $chatId = "$($update.message.chat.id)"
+                  $text = "$($update.message.text)".Trim()
+
+                  if ($chatId -eq "$env:CHAT_ID") {
+                    if ($text -eq "/status") {
+                      $uptime = (Get-Date) - $startTime
+                      $hours = [math]::Floor($uptime.TotalHours)
+                      $mins = $uptime.Minutes
+                      $reply = "🟢 <b>Status RDP:</b> Online`n⏰ <b>Uptime:</b> ${hours} jam${mins} menit"
+                      $body = @{ chat_id = $chatId; text =$reply; parse_mode = 'HTML' }
+                      $null = Invoke-RestMethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage") -Method Post -Body $body
+                    }
+                    elseif ($text -eq "/stop" -or $text -eq "/off") {
+                      $reply = "🛑 <b>RDP Berhasil Dimatikan!</b>"
+                      $body = @{ chat_id = $chatId; text =$reply; parse_mode = 'HTML' }
+                      $null = Invoke-RestMethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage") -Method Post -Body $body
+                      exit 0
+                    }
+                  }
+                }
+              }
+            } catch {
+              # Abaikan error sejenak jika koneksi kedip
+            }
+            Start-Sleep -Seconds 3
           }
           
