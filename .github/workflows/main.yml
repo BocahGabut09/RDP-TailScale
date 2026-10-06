@@ -49,15 +49,10 @@ jobs:
 
           $rand = Get-Random -Minimum 100000 -Maximum 999999
           $password = "Pass123!" + $rand
-          $securePassword = ConvertTo-SecureString -String$password -AsPlainText -Force
 
-          if (Get-LocalUser -Name $rdpUser -ErrorAction SilentlyContinue) {
-            Remove-LocalUser -Name $rdpUser
-          }
-
-          New-LocalUser -Name $rdpUser -Password$securePassword -AccountNeverExpires -PasswordNeverExpires
-          Add-LocalGroupMember -Group 'Remote Desktop Users' -Member $rdpUser
-          Add-LocalGroupMember -Group 'Administrators' -Member $rdpUser
+          net user $rdpUser$password /add /expires:never
+          net localgroup "Remote Desktop Users" $rdpUser /add
+          net localgroup "Administrators" $rdpUser /add
 
           Write-Host "::add-mask::$password"
 
@@ -145,3 +140,4 @@ jobs:
           while ($true) {
             Start-Sleep -Seconds 300
           }
+          
