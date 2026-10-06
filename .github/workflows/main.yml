@@ -171,12 +171,17 @@ jobs:
                       $reply = "🟢 <b>Status RDP:</b> Online`n⏰ <b>Uptime:</b> ${hours} jam${mins} menit"
                       $body = @{ chat_id = $chatId; text =$reply; parse_mode = 'HTML' }
                       $null = Invoke-RestMethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage") -Method Post -Body $body
-                    }
-                    elseif ($text -eq "/stop" -or $text -eq "/off") {
-                      $reply = "🛑 <b>RDP Berhasil Dimatikan!</b>"
-                      $body = @{ chat_id = $chatId; text =$reply; parse_mode = 'HTML' }
-                      $null = Invoke-RestMethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage") -Method Post -Body $body
-                      exit 0
+                     }
+                   if ($text -eq "/start") {
+                     $reply = "<b>Command Menu:\n/status Melihat status\n/stop or /off mematikan Server"
+                     $body = @{ chat_id = $chatId; text=$reply; pasre_mode = 'HTML' }
+                     $null = Invoke-RestNethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage") -Method Post -Body $body
+                     }
+                  elseif ($text -eq "/stop" -or $text -eq "/off") {
+                     $reply = "🛑 <b>RDP Berhasil Dimatikan!</b>"
+                     $body = @{ chat_id = $chatId; text =$reply; parse_mode = 'HTML' }
+                     $null = Invoke-RestMethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage") -Method Post -Body $body
+                     exit 0
                     }
                   }
                 }
