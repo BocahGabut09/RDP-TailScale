@@ -162,44 +162,45 @@ jobs:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          $offset = 0$startTime = Get-Date
+          $offset = 0;
+          $startTime = Get-Date;
 
           while ($true) {
             try {
-              $updates = Invoke-RestMethod -Uri "https://api.telegram.org/bot$env:BOT_TOKEN/getUpdates?offset=$offset&timeout=5" -Method Get -TimeoutSec 10
+              $updates = Invoke-RestMethod -Uri "https://api.telegram.org/bot$env:BOT_TOKEN/getUpdates?offset=$offset&timeout=5" -Method Get -TimeoutSec 10;
               if ($updates.ok -and$updates.result.Count -gt 0) {
-                foreach ($item in $updates.result) {$offset = $item.update_id + 1$chatId = "$($item.message.chat.id)"
-                  $text = "$($item.message.text)".Trim()
+                foreach ($item in$updates.result) {
+                  $offset =$item.update_id + 1;
+                  $chatId = "$($item.message.chat.id)";
+                  $text = "$($item.message.text)".Trim();
 
                   if ($chatId -eq "$env:CHAT_ID") {
                     if ($text -eq "/status") {
-                      $uptime = (Get-Date) -$startTime
-                      $hours = [math]::Floor($uptime.TotalHours)
-                      $mins =$uptime.Minutes
-                      $reply = "🟢 <b>Status RDP:</b> Online (Tailscale)`n⏰ <b>Uptime:</b> ${hours} jam ${mins} menit"
-                      $body = @{ chat_id = $chatId; text = $reply; parse_mode = 'HTML' }
-                      $null = Invoke-RestMethod -Uri "https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage" -Method Post -Body $body
+                      $uptime = (Get-Date) -$startTime;
+                      $hours = [math]::Floor($uptime.TotalHours);
+                      $mins =$uptime.Minutes;
+                      $reply = "🟢 <b>Status RDP:</b> Online (Tailscale)`n⏰ <b>Uptime:</b> ${hours} jam ${mins} menit";
+                      $body = @{ chat_id = $chatId; text = $reply; parse_mode = 'HTML' };
+                      $null = Invoke-RestMethod -Uri "https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage" -Method Post -Body $body;
                     }
                     elseif ($text -eq "/start" -or $text -eq "/menu") {
                       $reply = "🤖 <b>Bot Berjalan!</b>`n`n" +
                                "<b>Daftar Command:</b>`n" +
                                "• <code>/start</code> atau <code>/menu</code> - Untuk melihat menu`n" +
                                "• <code>/status</code> - Untuk melihat status RDP`n" +
-                               "• <code>/stop</code> atau <code>/off</code> - Untuk mematikan server"
-                      $body = @{ chat_id = $chatId; text =$reply; parse_mode = 'HTML' }
-                      $null = Invoke-RestMethod -Uri "https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage" -Method Post -Body $body
+                               "• <code>/stop</code> atau <code>/off</code> - Untuk mematikan server";
+                      $body = @{ chat_id = $chatId; text =$reply; parse_mode = 'HTML' };
+                      $null = Invoke-RestMethod -Uri "https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage" -Method Post -Body $body;
                     }
                     elseif ($text -eq "/stop" -or $text -eq "/off") {
-                      $reply = "🛑 <b>RDP Berhasil Dimatikan!</b>"
-                      $body = @{ chat_id = $chatId; text =$reply; parse_mode = 'HTML' }
-                      $null = Invoke-RestMethod -Uri "https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage" -Method Post -Body $body
-                      exit 0
+                      $reply = "🛑 <b>RDP Berhasil Dimatikan!</b>";
+                      $body = @{ chat_id = $chatId; text =$reply; parse_mode = 'HTML' };
+                      $null = Invoke-RestMethod -Uri "https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage" -Method Post -Body $body;
+                      exit 0;
                     }
                   }
                 }
               }
-            } catch {
-              # Abaikan error sementara
-            }
-            Start-Sleep -Seconds 3
+            } catch {}
+            Start-Sleep -Seconds 3;
           }
