@@ -61,7 +61,7 @@ jobs:
           Add-Content -Path($env:GITHUB_ENV) -Value("RDP_USERNAME=$rdpUser")
           Add-Content -Path($env:GITHUB_ENV) -Value("RDP_PASSWORD=$password")
 
-      - name: Install & Hubungkan Ngrok
+      -       - name: Install & Hubungkan Ngrok
         shell: pwsh
         env:
           NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
@@ -70,6 +70,7 @@ jobs:
             throw 'Secret NGROK_AUTH_TOKEN belum dibuat di GitHub Secrets!'
           }
 
+          # Download & Extract Ngrok dari URL baru
           $url = 'https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip'
           $zip = Join-Path -Path($env:TEMP) -ChildPath('ngrok.zip')
           
@@ -79,14 +80,16 @@ jobs:
           $ngrok = Join-Path -Path($env:TEMP) -ChildPath('ngrok.exe')
           & $ngrok config add-authtoken "$env:NGROK_AUTH_TOKEN"
           
-          Start-Process -FilePath($ngrok) -ArgumentList('tcp 3389')
+          # Jalankan Ngrok dengan pembuatan log file
+          $logFile = Join-Path -Path($env:TEMP) -ChildPath('ngrok.log')
+          Start-Process -FilePath($ngrok) -ArgumentList("tcp 3389 --log=`"$logFile`"")
 
           $hostPort =$null
-          for ($i = 1; $i -le 10; $i++) {
+          for ($i = 1; $i -le 12; $i++) {
             Start-Sleep -Seconds 3
             try {
               $tunnels = Invoke-RestMethod -Uri('http://127.0.0.1:4040/api/tunnels') -ErrorAction SilentlyContinue
-              if ($tunnels -and$tunnels.tunnels) {
+              if ($tunnels -and $tunnels.tunnels -and$tunnels.tunnels.Count -gt 0) {
                 $publicUrl =$tunnels.tunnels[0].public_url
                 if ($publicUrl) {
                   $hostPort =$publicUrl -replace 'tcp://', ''
@@ -96,8 +99,13 @@ jobs:
             } catch {}
           }
 
+          # Jika masih gagal dapet URL, tampilkan log error Ngrok-nya
           if ([string]::IsNullOrWhiteSpace($hostPort)) {
-            throw 'Gagal mendapatkan URL Ngrok. Cek NGROK_AUTH_TOKEN kamu.'
+            if (Test-Path $logFile) {
+              Write-Host "=== LOG NGROK ERROR ==="
+              Get-Content $logFile
+            }
+            throw 'Gagal mendapatkan URL Ngrok. Cek log error di atas.'
           }
 
           $parts =$hostPort.Split(':')
