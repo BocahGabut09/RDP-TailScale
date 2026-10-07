@@ -1,4 +1,4 @@
-name: RDP Telegram (Tailscale + Auto DNS)
+name: RDP Telegram 
 
 on:
   workflow_dispatch:
@@ -31,33 +31,33 @@ jobs:
       - name: Aktifkan RDP
         shell: pwsh
         run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0 -Force;
-          Enable-NetFirewallRule -DisplayGroup 'Remote Desktop';
-          Set-Service -Name TermService -StartupType Automatic;
-          Start-Service -Name TermService -ErrorAction SilentlyContinue;
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0 -Force
+          Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'
+          Set-Service -Name TermService -StartupType Automatic
+          Start-Service -Name TermService -ErrorAction SilentlyContinue
 
       - name: Buat user RDP
         shell: pwsh
         env:
           INPUT_USERNAME: ${{ inputs.username }}
         run: |
-          $rdpUser = "$env:INPUT_USERNAME".Trim();
-          if ([string]::IsNullOrWhiteSpace($rdpUser)) { $rdpUser = "RdpTpyo" };
+          $rdpUser = "$env:INPUT_USERNAME".Trim()
+          if ([string]::IsNullOrWhiteSpace($rdpUser)) { $rdpUser = "RdpTpyo" }
 
-          $rand = Get-Random -Minimum 100000 -Maximum 999999;
-          $password = "Pass123!" + "$rand";
-          $securePassword = ConvertTo-SecureString -String("$password") -AsPlainText -Force;
+          $rand = Get-Random -Minimum 100000 -Maximum 999999
+          $password = "Pass123!" + "$rand"
+          $securePassword = ConvertTo-SecureString -String "$password" -AsPlainText -Force
 
-          if (Get-LocalUser -Name("$rdpUser") -ErrorAction SilentlyContinue) {
-            Remove-LocalUser -Name("$rdpUser") -Force;
+          if (Get-LocalUser -Name "$rdpUser" -ErrorAction SilentlyContinue) {
+            Remove-LocalUser -Name "$rdpUser" -Force
           }
 
-          New-LocalUser -Name("$rdpUser") -Password($securePassword) -AccountNeverExpires -PasswordNeverExpires;
-          Add-LocalGroupMember -Group("Remote Desktop Users") -Member("$rdpUser");
-          Add-LocalGroupMember -Group("Administrators") -Member("$rdpUser");
+          New-LocalUser -Name "$rdpUser" -Password $securePassword -AccountNeverExpires -PasswordNeverExpires
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "$rdpUser"
+          Add-LocalGroupMember -Group "Administrators" -Member "$rdpUser"
 
-          Add-Content -Path($env:GITHUB_ENV) -Value("RDP_USERNAME=$rdpUser");
-          Add-Content -Path($env:GITHUB_ENV) -Value("RDP_PASSWORD=$password");
+          Add-Content -Path $env:GITHUB_ENV -Value "RDP_USERNAME=$rdpUser"
+          Add-Content -Path $env:GITHUB_ENV -Value "RDP_PASSWORD=$password"
 
       - name: Install & Hubungkan Tailscale
         shell: pwsh
@@ -65,21 +65,21 @@ jobs:
           TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY || secrets.TAILSCALE_AUTH_KEY }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:TAILSCALE_AUTHKEY)) {
-            throw 'Secret TAILSCALE_AUTHKEY / TAILSCALE_AUTH_KEY belum dibuat di GitHub Secrets!';
+            throw 'Secret TAILSCALE_AUTHKEY / TAILSCALE_AUTH_KEY belum dibuat di GitHub Secrets!'
           }
 
-          $exe = Join-Path -Path($env:TEMP) -ChildPath('tailscale-setup.exe');
-          Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe" -OutFile $exe;
-          Start-Process -FilePath $exe -ArgumentList "/quiet /norestart" -Wait;
+          $exe = Join-Path -Path $env:TEMP -ChildPath 'tailscale-setup.exe'
+          Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe" -OutFile $exe
+          Start-Process -FilePath $exe -ArgumentList "/quiet /norestart" -Wait
 
-          $tsPath = "C:\Program Files\Tailscale\tailscale.exe";
-          & $tsPath up --authkey="$env:TAILSCALE_AUTHKEY" --accept-routes;
+          $tsPath = "C:\Program Files\Tailscale\tailscale.exe"
+          & $tsPath up --authkey="$env:TAILSCALE_AUTHKEY" --accept-routes
 
-          Start-Sleep -Seconds 5;
-          $tsIp = (& $tsPath ip -4).Trim();
+          Start-Sleep -Seconds 5
+          $tsIp = (& $tsPath ip -4).Trim()
 
-          Write-Host "Tailscale IP: $tsIp";
-          Add-Content -Path($env:GITHUB_ENV) -Value("TAILSCALE_IP=$tsIp");
+          Write-Host "Tailscale IP: $tsIp"
+          Add-Content -Path $env:GITHUB_ENV -Value "TAILSCALE_IP=$tsIp"
 
       - name: Auto Update DNS Cloudflare
         shell: pwsh
@@ -90,35 +90,35 @@ jobs:
           TAILSCALE_IP: ${{ env.TAILSCALE_IP }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:CF_API_TOKEN) -or [string]::IsNullOrWhiteSpace($env:CF_ZONE_ID)) {
-            Write-Host "Cloudflare Secret belum lengkap, melewati update DNS.";
-            return;
+            Write-Host "Cloudflare Secret belum lengkap, melewati update DNS."
+            return
           }
 
           $headers = @{
             "Authorization" = "Bearer $env:CF_API_TOKEN"
             "Content-Type"  = "application/json"
-          };
+          }
 
-          $getUri = "https://api.cloudflare.com/client/v4/zones/$env:CF_ZONE_ID/dns_records?name=$env:CF_RECORD_NAME&type=A";
-          $res = Invoke-RestMethod -Uri $getUri -Headers $headers -Method Get;
+          $getUri = "https://api.cloudflare.com/client/v4/zones/$env:CF_ZONE_ID/dns_records?name=$env:CF_RECORD_NAME&type=A"
+          $res = Invoke-RestMethod -Uri $getUri -Headers $headers -Method Get
 
           if ($res.success -and $res.result.Count -gt 0) {
-            $recordId = $res.result[0].id;
-            $putUri = "https://api.cloudflare.com/client/v4/zones/$env:CF_ZONE_ID/dns_records/$recordId";
+            $recordId = $res.result[0].id
+            $putUri = "https://api.cloudflare.com/client/v4/zones/$env:CF_ZONE_ID/dns_records/$recordId"
             $body = @{
               type    = "A"
               name    = $env:CF_RECORD_NAME
               content = $env:TAILSCALE_IP
               ttl     = 120
               proxied = $false
-            } | ConvertTo-Json;
+            } | ConvertTo-Json
 
-            $update = Invoke-RestMethod -Uri $putUri -Headers $headers -Method Put -Body $body;
+            $update = Invoke-RestMethod -Uri $putUri -Headers $headers -Method Put -Body $body
             if ($update.success) {
-              Write-Host "DNS Cloudflare ($env:CF_RECORD_NAME) berhasil diperbarui ke IP $env:TAILSCALE_IP";
+              Write-Host "DNS Cloudflare ($env:CF_RECORD_NAME) berhasil diperbarui ke IP $env:TAILSCALE_IP"
             }
           } else {
-            Write-Host "Record A untuk $env:CF_RECORD_NAME tidak ditemukan. Pastikan sudah buat Record A sekali di Cloudflare.";
+            Write-Host "Record A untuk $env:CF_RECORD_NAME tidak ditemukan. Pastikan sudah buat Record A sekali di Cloudflare."
           }
 
       - name: Kirim akses ke Telegram
@@ -132,10 +132,10 @@ jobs:
           PASSWORD: ${{ env.RDP_PASSWORD }}
           OS_NAME: ${{ inputs.os_choice || 'windows-2022' }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:BOT_TOKEN)) { throw 'Secret TELEGRAM_BOT_TOKEN belum dibuat.' };
-          if ([string]::IsNullOrWhiteSpace($env:CHAT_ID)) { throw 'Secret TELEGRAM_CHAT_ID belum dibuat.' };
+          if ([string]::IsNullOrWhiteSpace($env:BOT_TOKEN)) { throw 'Secret TELEGRAM_BOT_TOKEN belum dibuat.' }
+          if ([string]::IsNullOrWhiteSpace($env:CHAT_ID)) { throw 'Secret TELEGRAM_CHAT_ID belum dibuat.' }
 
-          $hostConnect = if ([string]::IsNullOrWhiteSpace($env:DOMAIN)) { $env:IP } else { $env:DOMAIN };
+          $hostConnect = if ([string]::IsNullOrWhiteSpace($env:DOMAIN)) { $env:IP } else { $env:DOMAIN }
 
           $message = "<b>🖥 RDP WINDOWS (TAILSCALE) AKTIF</b>`n`n" +
                      "<b>OS:</b> $env:OS_NAME`n" +
@@ -147,10 +147,14 @@ jobs:
                      "🚀 <i>DNS telah di-update otomatis! Langsung sambungkan RD Client HP ke <b>$hostConnect</b> (Aplikasi Tailscale di HP wajib ON).</i>`n`n" +
                      "<b>🕹 Perintah Bot:</b>`n" +
                      "• <code>/status</code> - Cek status RDP`n" +
-                     "• <code>/stop</code> - Matikan RDP";
+                     "• <code>/stop</code> - Matikan RDP"
 
-          $body = @{ chat_id = $env:CHAT_ID; text =$message; parse_mode = 'HTML' };
-          $null = Invoke-RestMethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage") -Method Post -Body $body -TimeoutSec 30;
+          $body = @{
+            chat_id    = $env:CHAT_ID
+            text       = $message
+            parse_mode = 'HTML'
+          }
+          $null = Invoke-RestMethod -Uri "https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage" -Method Post -Body $body -TimeoutSec 30
 
       - name: Pertahankan RDP aktif & Bot Listener
         shell: pwsh
@@ -158,46 +162,44 @@ jobs:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          $offset = 0;
-          $startTime = Get-Date;
+          $offset = 0$startTime = Get-Date
 
           while ($true) {
             try {
-              $updates = Invoke-RestMethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/getUpdates?offset=$offset&timeout=5") -Method Get -TimeoutSec 10;
+              $updates = Invoke-RestMethod -Uri "https://api.telegram.org/bot$env:BOT_TOKEN/getUpdates?offset=$offset&timeout=5" -Method Get -TimeoutSec 10
               if ($updates.ok -and$updates.result.Count -gt 0) {
-                foreach ($update in$updates.result) {
-                  $offset =$update.update_id + 1;
-                  $chatId = "$($update.message.chat.id)";
-                  $text = "$($update.message.text)".Trim();
+                foreach ($item in $updates.result) {$offset = $item.update_id + 1$chatId = "$($item.message.chat.id)"
+                  $text = "$($item.message.text)".Trim()
 
                   if ($chatId -eq "$env:CHAT_ID") {
                     if ($text -eq "/status") {
-                      $uptime = (Get-Date) -$startTime;
-                      $hours = [math]::Floor($uptime.TotalHours);
-                      $mins =$uptime.Minutes;
-                      $reply = "🟢 <b>Status RDP:</b> Online (Tailscale)`n⏰ <b>Uptime:</b> ${hours} jam ${mins} menit";
-                      $body = @{ chat_id = $chatId; text = $reply; parse_mode = 'HTML' };
-                      $null = Invoke-RestMethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage") -Method Post -Body $body;
+                      $uptime = (Get-Date) -$startTime
+                      $hours = [math]::Floor($uptime.TotalHours)
+                      $mins =$uptime.Minutes
+                      $reply = "🟢 <b>Status RDP:</b> Online (Tailscale)`n⏰ <b>Uptime:</b> ${hours} jam ${mins} menit"
+                      $body = @{ chat_id = $chatId; text = $reply; parse_mode = 'HTML' }
+                      $null = Invoke-RestMethod -Uri "https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage" -Method Post -Body $body
                     }
                     elseif ($text -eq "/start" -or $text -eq "/menu") {
                       $reply = "🤖 <b>Bot Berjalan!</b>`n`n" +
                                "<b>Daftar Command:</b>`n" +
                                "• <code>/start</code> atau <code>/menu</code> - Untuk melihat menu`n" +
                                "• <code>/status</code> - Untuk melihat status RDP`n" +
-                               "• <code>/stop</code> atau <code>/off</code> - Untuk mematikan server";
-                      $body = @{ chat_id = $chatId; text =$reply; parse_mode = 'HTML' };
-                      $null = Invoke-RestMethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage") -Method Post -Body $body;
+                               "• <code>/stop</code> atau <code>/off</code> - Untuk mematikan server"
+                      $body = @{ chat_id = $chatId; text =$reply; parse_mode = 'HTML' }
+                      $null = Invoke-RestMethod -Uri "https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage" -Method Post -Body $body
                     }
                     elseif ($text -eq "/stop" -or $text -eq "/off") {
-                      $reply = "🛑 <b>RDP Berhasil Dimatikan!</b>";
-                      $body = @{ chat_id = $chatId; text =$reply; parse_mode = 'HTML' };
-                      $null = Invoke-RestMethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage") -Method Post -Body $body;
-                      exit 0;
+                      $reply = "🛑 <b>RDP Berhasil Dimatikan!</b>"
+                      $body = @{ chat_id = $chatId; text =$reply; parse_mode = 'HTML' }
+                      $null = Invoke-RestMethod -Uri "https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage" -Method Post -Body $body
+                      exit 0
                     }
                   }
                 }
               }
-            } catch {}
-            Start-Sleep -Seconds 3;
+            } catch {
+              # Abaikan error sementara
+            }
+            Start-Sleep -Seconds 3
           }
-          
