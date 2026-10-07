@@ -1,4 +1,4 @@
-name: RDP Telegram (Tailscale)
+name: RDP Telegram (Tailscale + Auto DNS)
 
 on:
   workflow_dispatch:
@@ -42,7 +42,7 @@ jobs:
           INPUT_USERNAME: ${{ inputs.username }}
         run: |
           $rdpUser = "$env:INPUT_USERNAME".Trim()
-          if ([string]::IsNullOrWhiteSpace($rdpUser)) {$rdpUser = "RdpTpyo" }
+          if ([string]::IsNullOrWhiteSpace($rdpUser)) { $rdpUser = "RdpTpyo" }
 
           $rand = Get-Random -Minimum 100000 -Maximum 999999
           $password = "Pass123!" + "$rand"
@@ -62,13 +62,12 @@ jobs:
       - name: Install & Hubungkan Tailscale
         shell: pwsh
         env:
-          TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
+          TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:TAILSCALE_AUTHKEY)) {
             throw 'Secret TAILSCALE_AUTHKEY belum dibuat di GitHub Secrets!'
           }
 
-          # Download & Install Tailscale
           $msi = Join-Path -Path($env:TEMP) -ChildPath('tailscale.msi')
           Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest.msi" -OutFile $msi
           Start-Process -FilePath "msiexec.exe" -ArgumentList "/i $msi /qn" -Wait
@@ -77,16 +76,58 @@ jobs:
           & $tsPath up --authkey="$env:TAILSCALE_AUTHKEY" --accept-routes
 
           Start-Sleep -Seconds 5
-          $tsIp = (&$tsPath ip -4).Trim()
+          $tsIp = (& $tsPath ip -4).Trim()
 
           Write-Host "Tailscale IP: $tsIp"
           Add-Content -Path($env:GITHUB_ENV) -Value("TAILSCALE_IP=$tsIp")
+
+      - name: Auto Update DNS Cloudflare
+        shell: pwsh
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+          CF_RECORD_NAME: ${{ secrets.CF_RECORD_NAME }}
+          TAILSCALE_IP: ${{ env.TAILSCALE_IP }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:CF_API_TOKEN) -or [string]::IsNullOrWhiteSpace($env:CF_ZONE_ID)) {
+            Write-Host "Cloudflare Secret belum lengkap, melewati update DNS."
+            return
+          }
+
+          $headers = @{
+            "Authorization" = "Bearer $env:CF_API_TOKEN"
+            "Content-Type"  = "application/json"
+          }
+
+          # Cari Record ID
+          $getUri = "https://api.cloudflare.com/client/v4/zones/$env:CF_ZONE_ID/dns_records?name=$env:CF_RECORD_NAME&type=A"
+          $res = Invoke-RestMethod -Uri $getUri -Headers $headers -Method Get
+
+          if ($res.success -and $res.result.Count -gt 0) {
+            $recordId = $res.result[0].id
+            $putUri = "https://api.cloudflare.com/client/v4/zones/$env:CF_ZONE_ID/dns_records/$recordId"
+            $body = @{
+              type    = "A"
+              name    = $env:CF_RECORD_NAME
+              content = $env:TAILSCALE_IP
+              ttl     = 120
+              proxied = $false
+            } | ConvertTo-Json
+
+            $update = Invoke-RestMethod -Uri $putUri -Headers $headers -Method Put -Body $body
+            if ($update.success) {
+              Write-Host "DNS Cloudflare ($env:CF_RECORD_NAME) berhasil diperbarui ke IP $env:TAILSCALE_IP"
+            }
+          } else {
+            Write-Host "Record A untuk $env:CF_RECORD_NAME tidak ditemukan. Pastikan sudah buat Record A sekali di Cloudflare."
+          }
 
       - name: Kirim akses ke Telegram
         shell: pwsh
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DOMAIN: ${{ secrets.CF_RECORD_NAME }}
           IP: ${{ env.TAILSCALE_IP }}
           USERNAME: ${{ env.RDP_USERNAME }}
           PASSWORD: ${{ env.RDP_PASSWORD }}
@@ -95,13 +136,16 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:BOT_TOKEN)) { throw 'Secret TELEGRAM_BOT_TOKEN belum dibuat.' }
           if ([string]::IsNullOrWhiteSpace($env:CHAT_ID)) { throw 'Secret TELEGRAM_CHAT_ID belum dibuat.' }
 
+          $hostConnect = if ([string]::IsNullOrWhiteSpace($env:DOMAIN)) { $env:IP } else { $env:DOMAIN }
+
           $message = "<b>🖥 RDP WINDOWS (TAILSCALE) AKTIF</b>`n`n" +
                      "<b>OS:</b> $env:OS_NAME`n" +
+                     "<b>PC Name / Host:</b> <code>$hostConnect</code>`n" +
                      "<b>IP Tailscale:</b> <code>$env:IP</code>`n" +
-                     "<b>Port RDP:</b> <code>3389</code>`n" +
+                     "<b>Port:</b> <code>3389</code> (Standar)`n" +
                      "<b>Username:</b> <code>$env:USERNAME</code>`n" +
                      "<b>Password:</b> <code>$env:PASSWORD</code>`n`n" +
-                     "💡 <i>Koneksi paling kencang tanpa delay. Jalankan Tailscale di HP kamu lalu konek ke IP di atas / domainmu.</i>`n`n" +
+                     "🚀 <i>DNS telah di-update otomatis! Langsung sambungkan RD Client HP ke <b>$hostConnect</b> (Aplikasi Tailscale di HP wajib ON).</i>`n`n" +
                      "<b>🕹 Perintah Bot:</b>`n" +
                      "• <code>/status</code> - Cek status RDP`n" +
                      "• <code>/stop</code> - Matikan RDP"
@@ -154,3 +198,4 @@ jobs:
             } catch {}
             Start-Sleep -Seconds 3
           }
+          
