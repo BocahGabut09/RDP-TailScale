@@ -1,4 +1,4 @@
-name: RDP Telegram (Bore CLI)
+name: RDP Telegram (Tailscale)
 
 on:
   workflow_dispatch:
@@ -42,7 +42,7 @@ jobs:
           INPUT_USERNAME: ${{ inputs.username }}
         run: |
           $rdpUser = "$env:INPUT_USERNAME".Trim()
-          if ([string]::IsNullOrWhiteSpace($rdpUser)) { $rdpUser = "RdpTpyo" }
+          if ([string]::IsNullOrWhiteSpace($rdpUser)) {$rdpUser = "RdpTpyo" }
 
           $rand = Get-Random -Minimum 100000 -Maximum 999999
           $password = "Pass123!" + "$rand"
@@ -56,55 +56,38 @@ jobs:
           Add-LocalGroupMember -Group("Remote Desktop Users") -Member("$rdpUser")
           Add-LocalGroupMember -Group("Administrators") -Member("$rdpUser")
 
-          Write-Host("::add-mask::$password")
-
           Add-Content -Path($env:GITHUB_ENV) -Value("RDP_USERNAME=$rdpUser")
           Add-Content -Path($env:GITHUB_ENV) -Value("RDP_PASSWORD=$password")
 
-      - name: Install & Hubungkan Bore Tunnel
+      - name: Install & Hubungkan Tailscale
         shell: pwsh
+        env:
+          TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
         run: |
-          # Download Bore CLI
-          $url = "https://github.com/ekzhang/bore/releases/download/v0.5.0/bore-v0.5.0-x86_64-pc-windows-msvc.zip"
-          $zip = Join-Path -Path($env:TEMP) -ChildPath('bore.zip')
-          Invoke-WebRequest -Uri $url -OutFile $zip
-          Expand-Archive -Path $zip -DestinationPath $env:TEMP -Force
-
-          $exe = Join-Path -Path($env:TEMP) -ChildPath('bore.exe')
-          $logOut = Join-Path -Path($env:TEMP) -ChildPath('bore_out.log')
-          $logErr = Join-Path -Path($env:TEMP) -ChildPath('bore_err.log')
-
-          # Jalankan tunnel ke bore.pub (StandardOutput dan StandardError dipisah agar tidak error)
-          Start-Process -FilePath $exe -ArgumentList "local 3389 --to bore.pub" -RedirectStandardOutput $logOut -RedirectStandardError $logErr
-
-          $hostPort = $null
-          for ($i = 1; $i -le 15; $i++) {
-            Start-Sleep -Seconds 2
-            $logs = ""
-            if (Test-Path $logOut) { $logs += Get-Content $logOut -Raw }
-            if (Test-Path $logErr) { $logs += Get-Content $logErr -Raw }
-
-            if ($logs -match 'bore\.pub:(\d+)') {
-              $port = $Matches[1]
-              $hostPort = "bore.pub:$port"
-              break
-            }
+          if ([string]::IsNullOrWhiteSpace($env:TAILSCALE_AUTHKEY)) {
+            throw 'Secret TAILSCALE_AUTHKEY belum dibuat di GitHub Secrets!'
           }
 
-          if ([string]::IsNullOrWhiteSpace($hostPort)) {
-            if (Test-Path $logOut) { Get-Content $logOut }
-            if (Test-Path $logErr) { Get-Content $logErr }
-            throw 'Gagal mendapatkan port dari Bore tunnel.'
-          }
+          # Download & Install Tailscale
+          $msi = Join-Path -Path($env:TEMP) -ChildPath('tailscale.msi')
+          Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest.msi" -OutFile $msi
+          Start-Process -FilePath "msiexec.exe" -ArgumentList "/i $msi /qn" -Wait
 
-          Add-Content -Path($env:GITHUB_ENV) -Value("BORE_FULL=$hostPort")
+          $tsPath = "C:\Program Files\Tailscale\tailscale.exe"
+          & $tsPath up --authkey="$env:TAILSCALE_AUTHKEY" --accept-routes
+
+          Start-Sleep -Seconds 5
+          $tsIp = (&$tsPath ip -4).Trim()
+
+          Write-Host "Tailscale IP: $tsIp"
+          Add-Content -Path($env:GITHUB_ENV) -Value("TAILSCALE_IP=$tsIp")
 
       - name: Kirim akses ke Telegram
         shell: pwsh
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          FULL: ${{ env.BORE_FULL }}
+          IP: ${{ env.TAILSCALE_IP }}
           USERNAME: ${{ env.RDP_USERNAME }}
           PASSWORD: ${{ env.RDP_PASSWORD }}
           OS_NAME: ${{ inputs.os_choice || 'windows-2022' }}
@@ -112,22 +95,18 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:BOT_TOKEN)) { throw 'Secret TELEGRAM_BOT_TOKEN belum dibuat.' }
           if ([string]::IsNullOrWhiteSpace($env:CHAT_ID)) { throw 'Secret TELEGRAM_CHAT_ID belum dibuat.' }
 
-          $message = "<b>🖥 RDP WINDOWS (BORE) AKTIF</b>`n`n" +
+          $message = "<b>🖥 RDP WINDOWS (TAILSCALE) AKTIF</b>`n`n" +
                      "<b>OS:</b> $env:OS_NAME`n" +
-                     "<b>PC Name / Host:</b> <code>$env:FULL</code>`n" +
+                     "<b>IP Tailscale:</b> <code>$env:IP</code>`n" +
+                     "<b>Port RDP:</b> <code>3389</code>`n" +
                      "<b>Username:</b> <code>$env:USERNAME</code>`n" +
                      "<b>Password:</b> <code>$env:PASSWORD</code>`n`n" +
-                     "💡 <i>Copas PC Name ke RD Client HP. (Jika mau pakai domain sendiri, buat CNAME <code>rdp</code> ke <code>bore.pub</code> lalu pakai format <code>rdp.domainmu.com:PORT</code>)</i>`n`n" +
+                     "💡 <i>Koneksi paling kencang tanpa delay. Jalankan Tailscale di HP kamu lalu konek ke IP di atas / domainmu.</i>`n`n" +
                      "<b>🕹 Perintah Bot:</b>`n" +
                      "• <code>/status</code> - Cek status RDP`n" +
                      "• <code>/stop</code> - Matikan RDP"
 
-          $body = @{
-            chat_id = $env:CHAT_ID
-            text = $message
-            parse_mode = 'HTML'
-          }
-
+          $body = @{ chat_id = $env:CHAT_ID; text =$message; parse_mode = 'HTML' }
           $null = Invoke-RestMethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage") -Method Post -Body $body -TimeoutSec 30
 
       - name: Pertahankan RDP aktif & Bot Listener
@@ -150,7 +129,7 @@ jobs:
                       $uptime = (Get-Date) -$startTime
                       $hours = [math]::Floor($uptime.TotalHours)
                       $mins =$uptime.Minutes
-                      $reply = "🟢 <b>Status RDP:</b> Online (Bore)`n⏰ <b>Uptime:</b> ${hours} jam ${mins} menit"
+                      $reply = "🟢 <b>Status RDP:</b> Online (Tailscale)`n⏰ <b>Uptime:</b> ${hours} jam ${mins} menit"
                       $body = @{ chat_id = $chatId; text = $reply; parse_mode = 'HTML' }
                       $null = Invoke-RestMethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage") -Method Post -Body $body
                     }
@@ -172,3 +151,6 @@ jobs:
                   }
                 }
               }
+            } catch {}
+            Start-Sleep -Seconds 3
+          }
