@@ -71,26 +71,29 @@ jobs:
           Expand-Archive -Path $zip -DestinationPath $env:TEMP -Force
 
           $exe = Join-Path -Path($env:TEMP) -ChildPath('bore.exe')
-          $logFile = Join-Path -Path($env:TEMP) -ChildPath('bore.log')
+          $logOut = Join-Path -Path($env:TEMP) -ChildPath('bore_out.log')
+          $logErr = Join-Path -Path($env:TEMP) -ChildPath('bore_err.log')
 
-          # Jalankan tunnel ke bore.pub
-          Start-Process -FilePath $exe -ArgumentList "local 3389 --to bore.pub" -RedirectStandardOutput $logFile -RedirectStandardError $logFile
+          # Jalankan tunnel ke bore.pub (StandardOutput dan StandardError dipisah agar tidak error)
+          Start-Process -FilePath $exe -ArgumentList "local 3389 --to bore.pub" -RedirectStandardOutput $logOut -RedirectStandardError $logErr
 
           $hostPort = $null
           for ($i = 1; $i -le 15; $i++) {
             Start-Sleep -Seconds 2
-            if (Test-Path $logFile) {
-              $logs = Get-Content $logFile -Raw
-              if ($logs -match 'bore\.pub:(\d+)') {
-                $port = $Matches[1]
-                $hostPort = "bore.pub:$port"
-                break
-              }
+            $logs = ""
+            if (Test-Path $logOut) { $logs += Get-Content $logOut -Raw }
+            if (Test-Path $logErr) { $logs += Get-Content $logErr -Raw }
+
+            if ($logs -match 'bore\.pub:(\d+)') {
+              $port = $Matches[1]
+              $hostPort = "bore.pub:$port"
+              break
             }
           }
 
           if ([string]::IsNullOrWhiteSpace($hostPort)) {
-            if (Test-Path $logFile) { Get-Content $logFile }
+            if (Test-Path $logOut) { Get-Content $logOut }
+            if (Test-Path $logErr) { Get-Content $logErr }
             throw 'Gagal mendapatkan port dari Bore tunnel.'
           }
 
@@ -169,8 +172,3 @@ jobs:
                   }
                 }
               }
-            } catch {
-              # Abaikan error sejenak
-            }
-            Start-Sleep -Seconds 3
-          }
