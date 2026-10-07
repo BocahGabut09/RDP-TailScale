@@ -165,11 +165,19 @@ jobs:
           $offset = 0;
           $startTime = Get-Date;
 
+          # Buang/clear riwayat pesan lama dari Telegram saat bot baru nyala
+          try {
+            $init = Invoke-RestMethod -Uri "https://api.telegram.org/bot$env:BOT_TOKEN/getUpdates?offset=-1" -Method Get -TimeoutSec 10;
+            if ($init.ok -and $init.result.Count -gt 0) {
+              $offset =$init.result[-1].update_id + 1;
+            }
+          } catch {}
+
           while ($true) {
             try {
               $updates = Invoke-RestMethod -Uri "https://api.telegram.org/bot$env:BOT_TOKEN/getUpdates?offset=$offset&timeout=5" -Method Get -TimeoutSec 10;
-              if ($updates.ok -and$updates.result.Count -gt 0) {
-                foreach ($item in $updates.result) {
+              if ($updates.ok -and $updates.result.Count -gt 0) {$updates.result | ForEach-Object {
+                  $item =$_;
                   $offset =$item.update_id + 1;
                   $chatId = "$($item.message.chat.id)";
                   $text = "$($item.message.text)".Trim();
