@@ -1,4 +1,4 @@
-name: RDP Telegram (Ngrok)
+name: RDP Telegram (Playit.gg)
 
 on:
   workflow_dispatch:
@@ -61,88 +61,77 @@ jobs:
           Add-Content -Path($env:GITHUB_ENV) -Value("RDP_USERNAME=$rdpUser")
           Add-Content -Path($env:GITHUB_ENV) -Value("RDP_PASSWORD=$password")
 
-      - name: Install & Hubungkan Ngrok
+      - name: Install & Hubungkan Playit.gg
         shell: pwsh
         env:
-          NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PLAYIT_SECRET: ${{ secrets.PLAYIT_SECRET }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:NGROK_AUTH_TOKEN)) {
-            throw 'Secret NGROK_AUTH_TOKEN belum dibuat di GitHub Secrets!'
-          }
+          # Download Playit CLI
+          $url = "https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-windows-x86_64.exe"
+          $exe = Join-Path -Path($env:TEMP) -ChildPath('playit.exe')
+          Invoke-WebRequest -Uri $url -OutFile $exe
 
-          # Download & Extract Ngrok dari URL baru
-          $url = 'https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip'
-          $zip = Join-Path -Path($env:TEMP) -ChildPath('ngrok.zip')
-          
-          Invoke-WebRequest -Uri($url) -OutFile($zip)
-          Expand-Archive -Path($zip) -DestinationPath($env:TEMP) -Force
+          $logFile = Join-Path -Path($env:TEMP) -ChildPath('playit.log')
 
-          $ngrok = Join-Path -Path($env:TEMP) -ChildPath('ngrok.exe')
-          & $ngrok config add-authtoken "$env:NGROK_AUTH_TOKEN"
-          
-          # Jalankan Ngrok dengan pembuatan log file
-          $logFile = Join-Path -Path($env:TEMP) -ChildPath('ngrok.log')
-          Start-Process -FilePath($ngrok) -ArgumentList("tcp 3389 --log=`"$logFile`"")
+          if ([string]::IsNullOrWhiteSpace($env:PLAYIT_SECRET)) {
+            # Jika belum ada PLAYIT_SECRET, buat Claim Link
+            Start-Process -FilePath $exe -RedirectStandardOutput $logFile -RedirectStandardError $logFile
+            Start-Sleep -Seconds 6
 
-          $hostPort = $null
-          for ($i = 1; $i -le 12; $i++) {
-            Start-Sleep -Seconds 3
-            try {
-              $tunnels = Invoke-RestMethod -Uri('http://127.0.0.1:4040/api/tunnels') -ErrorAction SilentlyContinue
-              if ($tunnels -and $tunnels.tunnels -and $tunnels.tunnels.Count -gt 0) {
-                $publicUrl = $tunnels.tunnels[0].public_url
-                if ($publicUrl) {
-                  $hostPort = $publicUrl -replace 'tcp://', ''
-                  break
-                }
-              }
-            } catch {}
-          }
+            $logs = Get-Content $logFile -Raw
+            if ($logs -match 'https://playit\.gg/claim/[a-zA-Z0-9-]+') {
+              $claimUrl = $Matches[0]
 
-          # Jika masih gagal dapet URL, tampilkan log error Ngrok-nya
-          if ([string]::IsNullOrWhiteSpace($hostPort)) {
-            if (Test-Path $logFile) {
-              Write-Host "=== LOG NGROK ERROR ==="
-              Get-Content $logFile
+              $msg = "🔗 <b>KLAIM PLAYIT AGENT</b>`n`n" +
+                     "Klik link ini untuk menghubungkan RDP ke akun Playit:`n" +
+                     "$claimUrl`n`n" +
+                     "💡 <i>Setelah klaim, buat Secret Key di Playit lalu simpan di GitHub Secrets dengan nama <b>PLAYIT_SECRET</b> agar otomatis seterusnya!</i>"
+
+              $body = @{ chat_id = $env:CHAT_ID; text =$msg; parse_mode = 'HTML' }
+              $null = Invoke-RestMethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage") -Method Post -Body $body
+              throw 'Claim Link telah dikirim ke Telegram. Silakan klik link tersebut di Telegram.'
             }
-            throw 'Gagal mendapatkan URL Ngrok. Cek log error di atas.'
+          } else {
+            # Jalankan dengan PLAYIT_SECRET yang tersimpan
+            Start-Process -FilePath $exe -ArgumentList "run --secret $env:PLAYIT_SECRET" -RedirectStandardOutput $logFile -RedirectStandardError$logFile
+            Start-Sleep -Seconds 10
           }
 
-          $parts = $hostPort.Split(':')
-          $ngrokHost = $parts[0]
-          $ngrokPort = $parts[1]
+          # Ambil Info Tunnel dari API Playit
+          $playitAddress = "Cek Tunnel di Dashboard Playit.gg"
+          try {
+            $bodyJson = @{ secret = $env:PLAYIT_SECRET } \vert{} ConvertTo-Json$res = Invoke-RestMethod -Uri "https://api.playit.gg/v1/proto/secret/info" -Method Post -Body $bodyJson -ContentType "application/json" -ErrorAction SilentlyContinue
+            if ($res -and$res.data -and $res.data.tunnels -and$res.data.tunnels.Count -gt 0) {
+              $t =$res.data.tunnels[0]
+              $hostName =$t.display_address
+              $portNum =$t.port
+              $playitAddress = "$hostName`:$portNum"
+            }
+          } catch {}
 
-          Write-Host("::add-mask::$ngrokHost")
-          Write-Host("::add-mask::$ngrokPort")
-          Add-Content -Path($env:GITHUB_ENV) -Value("NGROK_HOST=$ngrokHost")
-          Add-Content -Path($env:GITHUB_ENV) -Value("NGROK_PORT=$ngrokPort")
-          Add-Content -Path($env:GITHUB_ENV) -Value("NGROK_FULL=$hostPort")
+          Add-Content -Path($env:GITHUB_ENV) -Value("PLAYIT_FULL=$playitAddress")
 
       - name: Kirim akses ke Telegram
         shell: pwsh
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          HOST: ${{ env.NGROK_HOST }}
-          PORT: ${{ env.NGROK_PORT }}
-          FULL: ${{ env.NGROK_FULL }}
+          FULL: ${{ env.PLAYIT_FULL }}
           USERNAME: ${{ env.RDP_USERNAME }}
           PASSWORD: ${{ env.RDP_PASSWORD }}
           OS_NAME: ${{ inputs.os_choice || 'windows-2022' }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:BOT_TOKEN)) {
-            throw 'Secret TELEGRAM_BOT_TOKEN belum dibuat.'
-          }
-          if ([string]::IsNullOrWhiteSpace($env:CHAT_ID)) {
-            throw 'Secret TELEGRAM_CHAT_ID belum dibuat.'
-          }
+          if ([string]::IsNullOrWhiteSpace($env:BOT_TOKEN)) { throw 'Secret TELEGRAM_BOT_TOKEN belum dibuat.' }
+          if ([string]::IsNullOrWhiteSpace($env:CHAT_ID)) { throw 'Secret TELEGRAM_CHAT_ID belum dibuat.' }
 
-          $message = "<b>🖥 RDP WINDOWS (NGROK) AKTIF</b>`n`n" +
+          $message = "<b>🖥 RDP WINDOWS (PLAYIT) AKTIF</b>`n`n" +
                      "<b>OS:</b> $env:OS_NAME`n" +
                      "<b>PC Name / Host:</b> <code>$env:FULL</code>`n" +
                      "<b>Username:</b> <code>$env:USERNAME</code>`n" +
                      "<b>Password:</b> <code>$env:PASSWORD</code>`n`n" +
-                     "💡 <i>Langsung copas isi <b>PC Name</b> di RD Client HP dengan: <code>$env:FULL</code> (tanpa VPN lagi)</i>`n`n" +
+                     "💡 <i>Langsung copas isi <b>PC Name</b> ke RD Client HP (tanpa VPN).</i>`n`n" +
                      "<b>🕹 Perintah Bot:</b>`n" +
                      "• <code>/status</code> - Cek status RDP`n" +
                      "• <code>/stop</code> - Matikan RDP"
@@ -175,7 +164,7 @@ jobs:
                       $uptime = (Get-Date) -$startTime
                       $hours = [math]::Floor($uptime.TotalHours)
                       $mins =$uptime.Minutes
-                      $reply = "🟢 <b>Status RDP:</b> Online (Ngrok)`n⏰ <b>Uptime:</b> ${hours} jam ${mins} menit"
+                      $reply = "🟢 <b>Status RDP:</b> Online (Playit.gg)`n⏰ <b>Uptime:</b> ${hours} jam ${mins} menit"
                       $body = @{ chat_id = $chatId; text = $reply; parse_mode = 'HTML' }
                       $null = Invoke-RestMethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage") -Method Post -Body $body
                     }
