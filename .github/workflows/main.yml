@@ -169,7 +169,7 @@ jobs:
             try {
               $updates = Invoke-RestMethod -Uri "https://api.telegram.org/bot$env:BOT_TOKEN/getUpdates?offset=$offset&timeout=5" -Method Get -TimeoutSec 10;
               if ($updates.ok -and$updates.result.Count -gt 0) {
-                foreach ($item in$updates.result) {
+                foreach ($item in $updates.result) {
                   $offset =$item.update_id + 1;
                   $chatId = "$($item.message.chat.id)";
                   $text = "$($item.message.text)".Trim();
