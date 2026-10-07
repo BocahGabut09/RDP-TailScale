@@ -42,7 +42,7 @@ jobs:
           INPUT_USERNAME: ${{ inputs.username }}
         run: |
           $rdpUser = "$env:INPUT_USERNAME".Trim()
-          if ([string]::IsNullOrWhiteSpace($rdpUser)) {$rdpUser = "RdpTpyo" }
+          if ([string]::IsNullOrWhiteSpace($rdpUser)) { $rdpUser = "RdpTpyo" }
 
           $rand = Get-Random -Minimum 100000 -Maximum 999999
           $password = "Pass123!" + "$rand"
@@ -61,7 +61,7 @@ jobs:
           Add-Content -Path($env:GITHUB_ENV) -Value("RDP_USERNAME=$rdpUser")
           Add-Content -Path($env:GITHUB_ENV) -Value("RDP_PASSWORD=$password")
 
-      -       - name: Install & Hubungkan Ngrok
+      - name: Install & Hubungkan Ngrok
         shell: pwsh
         env:
           NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
@@ -84,15 +84,15 @@ jobs:
           $logFile = Join-Path -Path($env:TEMP) -ChildPath('ngrok.log')
           Start-Process -FilePath($ngrok) -ArgumentList("tcp 3389 --log=`"$logFile`"")
 
-          $hostPort =$null
+          $hostPort = $null
           for ($i = 1; $i -le 12; $i++) {
             Start-Sleep -Seconds 3
             try {
               $tunnels = Invoke-RestMethod -Uri('http://127.0.0.1:4040/api/tunnels') -ErrorAction SilentlyContinue
-              if ($tunnels -and $tunnels.tunnels -and$tunnels.tunnels.Count -gt 0) {
-                $publicUrl =$tunnels.tunnels[0].public_url
+              if ($tunnels -and $tunnels.tunnels -and $tunnels.tunnels.Count -gt 0) {
+                $publicUrl = $tunnels.tunnels[0].public_url
                 if ($publicUrl) {
-                  $hostPort =$publicUrl -replace 'tcp://', ''
+                  $hostPort = $publicUrl -replace 'tcp://', ''
                   break
                 }
               }
@@ -108,9 +108,9 @@ jobs:
             throw 'Gagal mendapatkan URL Ngrok. Cek log error di atas.'
           }
 
-          $parts =$hostPort.Split(':')
-          $ngrokHost =$parts[0]
-          $ngrokPort =$parts[1]
+          $parts = $hostPort.Split(':')
+          $ngrokHost = $parts[0]
+          $ngrokPort = $parts[1]
 
           Write-Host("::add-mask::$ngrokHost")
           Write-Host("::add-mask::$ngrokPort")
@@ -161,32 +161,33 @@ jobs:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          $offset = 0
-          $startTime = Get-Date
+          $offset = 0$startTime = Get-Date
 
           while ($true) {
             try {
               $updates = Invoke-RestMethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/getUpdates?offset=$offset&timeout=5") -Method Get -TimeoutSec 10
-              if ($updates.ok -and $updates.result.Count -gt 0) {
-                foreach ($update in $updates.result) {
-                  $offset = $update.update_id + 1
-                  $chatId = "$($update.message.chat.id)"
+              if ($updates.ok -and$updates.result.Count -gt 0) {
+                foreach ($update in $updates.result) {$offset = $update.update_id + 1$chatId = "$($update.message.chat.id)"
                   $text = "$($update.message.text)".Trim()
 
                   if ($chatId -eq "$env:CHAT_ID") {
                     if ($text -eq "/status") {
-                      $uptime = (Get-Date) - $startTime
+                      $uptime = (Get-Date) -$startTime
                       $hours = [math]::Floor($uptime.TotalHours)
-                      $mins = $uptime.Minutes
-                      $reply = "🟢 <b>Status RDP:</b> Online (Ngrok)`n⏰ <b>Uptime:</b> ${hours} jam${mins} menit"
+                      $mins =$uptime.Minutes
+                      $reply = "🟢 <b>Status RDP:</b> Online (Ngrok)`n⏰ <b>Uptime:</b> ${hours} jam ${mins} menit"
+                      $body = @{ chat_id = $chatId; text = $reply; parse_mode = 'HTML' }
+                      $null = Invoke-RestMethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage") -Method Post -Body $body
+                    }
+                    elseif ($text -eq "/start" -or $text -eq "/menu") {
+                      $reply = "🤖 <b>Bot Berjalan!</b>`n`n" +
+                               "<b>Daftar Command:</b>`n" +
+                               "• <code>/start</code> atau <code>/menu</code> - Untuk melihat menu`n" +
+                               "• <code>/status</code> - Untuk melihat status RDP`n" +
+                               "• <code>/stop</code> atau <code>/off</code> - Untuk mematikan server"
                       $body = @{ chat_id = $chatId; text =$reply; parse_mode = 'HTML' }
                       $null = Invoke-RestMethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage") -Method Post -Body $body
                     }
-                    elseif ($text -eq "/start" or $text -eq "/menu") {
-                      $reply = "<b>Bot Berjalan!'nDaftar Command:'n<b>/start or /menu <b>Untuk Melihat Menu<b>'n/status <b>Untuk Melihat Status<b>'n/stop or /off <b>Untuk Mematikan Server<b>"
-                      $body =@{ chat_id = $chatid; text =$reply: parse_mode = 'HTML' }
-                      $null = Invoke-RestMethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage") -Method Post -Body $body
-                      }
                     elseif ($text -eq "/stop" -or $text -eq "/off") {
                       $reply = "🛑 <b>RDP Berhasil Dimatikan!</b>"
                       $body = @{ chat_id = $chatId; text =$reply; parse_mode = 'HTML' }
@@ -201,4 +202,3 @@ jobs:
             }
             Start-Sleep -Seconds 3
           }
-          
