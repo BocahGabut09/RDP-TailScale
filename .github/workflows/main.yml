@@ -1,4 +1,4 @@
-name: RDP Telegram (Playit.gg)
+name: RDP Telegram (Bore CLI)
 
 on:
   workflow_dispatch:
@@ -61,64 +61,47 @@ jobs:
           Add-Content -Path($env:GITHUB_ENV) -Value("RDP_USERNAME=$rdpUser")
           Add-Content -Path($env:GITHUB_ENV) -Value("RDP_PASSWORD=$password")
 
-      - name: Install & Hubungkan Playit.gg
+      - name: Install & Hubungkan Bore Tunnel
         shell: pwsh
-        env:
-          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          PLAYIT_SECRET: ${{ secrets.PLAYIT_SECRET }}
         run: |
-          # Download Playit CLI
-          $url = "https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-windows-x86_64.exe"
-          $exe = Join-Path -Path($env:TEMP) -ChildPath('playit.exe')
-          Invoke-WebRequest -Uri $url -OutFile $exe
+          # Download Bore CLI
+          $url = "https://github.com/ekzhang/bore/releases/download/v0.5.0/bore-v0.5.0-x86_64-pc-windows-msvc.zip"
+          $zip = Join-Path -Path($env:TEMP) -ChildPath('bore.zip')
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $env:TEMP -Force
 
-          $logFile = Join-Path -Path($env:TEMP) -ChildPath('playit.log')
+          $exe = Join-Path -Path($env:TEMP) -ChildPath('bore.exe')
+          $logFile = Join-Path -Path($env:TEMP) -ChildPath('bore.log')
 
-          if ([string]::IsNullOrWhiteSpace($env:PLAYIT_SECRET)) {
-            # Jika belum ada PLAYIT_SECRET, buat Claim Link
-            Start-Process -FilePath $exe -RedirectStandardOutput $logFile -RedirectStandardError $logFile
-            Start-Sleep -Seconds 6
+          # Jalankan tunnel ke bore.pub
+          Start-Process -FilePath $exe -ArgumentList "local 3389 --to bore.pub" -RedirectStandardOutput $logFile -RedirectStandardError $logFile
 
-            $logs = Get-Content $logFile -Raw
-            if ($logs -match 'https://playit\.gg/claim/[a-zA-Z0-9-]+') {
-              $claimUrl = $Matches[0]
-
-              $msg = "🔗 <b>KLAIM PLAYIT AGENT</b>`n`n" +
-                     "Klik link ini untuk menghubungkan RDP ke akun Playit:`n" +
-                     "$claimUrl`n`n" +
-                     "💡 <i>Setelah klaim, buat Secret Key di Playit lalu simpan di GitHub Secrets dengan nama <b>PLAYIT_SECRET</b> agar otomatis seterusnya!</i>"
-
-              $body = @{ chat_id = $env:CHAT_ID; text =$msg; parse_mode = 'HTML' }
-              $null = Invoke-RestMethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage") -Method Post -Body $body
-              throw 'Claim Link telah dikirim ke Telegram. Silakan klik link tersebut di Telegram.'
+          $hostPort = $null
+          for ($i = 1; $i -le 15; $i++) {
+            Start-Sleep -Seconds 2
+            if (Test-Path $logFile) {
+              $logs = Get-Content $logFile -Raw
+              if ($logs -match 'bore\.pub:(\d+)') {
+                $port = $Matches[1]
+                $hostPort = "bore.pub:$port"
+                break
+              }
             }
-          } else {
-            # Jalankan dengan PLAYIT_SECRET yang tersimpan
-            Start-Process -FilePath $exe -ArgumentList "run --secret $env:PLAYIT_SECRET" -RedirectStandardOutput $logFile -RedirectStandardError$logFile
-            Start-Sleep -Seconds 10
           }
 
-          # Ambil Info Tunnel dari API Playit
-          $playitAddress = "Cek Tunnel di Dashboard Playit.gg"
-          try {
-            $bodyJson = @{ secret = $env:PLAYIT_SECRET } \vert{} ConvertTo-Json$res = Invoke-RestMethod -Uri "https://api.playit.gg/v1/proto/secret/info" -Method Post -Body $bodyJson -ContentType "application/json" -ErrorAction SilentlyContinue
-            if ($res -and$res.data -and $res.data.tunnels -and$res.data.tunnels.Count -gt 0) {
-              $t =$res.data.tunnels[0]
-              $hostName =$t.display_address
-              $portNum =$t.port
-              $playitAddress = "$hostName`:$portNum"
-            }
-          } catch {}
+          if ([string]::IsNullOrWhiteSpace($hostPort)) {
+            if (Test-Path $logFile) { Get-Content $logFile }
+            throw 'Gagal mendapatkan port dari Bore tunnel.'
+          }
 
-          Add-Content -Path($env:GITHUB_ENV) -Value("PLAYIT_FULL=$playitAddress")
+          Add-Content -Path($env:GITHUB_ENV) -Value("BORE_FULL=$hostPort")
 
       - name: Kirim akses ke Telegram
         shell: pwsh
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          FULL: ${{ env.PLAYIT_FULL }}
+          FULL: ${{ env.BORE_FULL }}
           USERNAME: ${{ env.RDP_USERNAME }}
           PASSWORD: ${{ env.RDP_PASSWORD }}
           OS_NAME: ${{ inputs.os_choice || 'windows-2022' }}
@@ -126,12 +109,12 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:BOT_TOKEN)) { throw 'Secret TELEGRAM_BOT_TOKEN belum dibuat.' }
           if ([string]::IsNullOrWhiteSpace($env:CHAT_ID)) { throw 'Secret TELEGRAM_CHAT_ID belum dibuat.' }
 
-          $message = "<b>🖥 RDP WINDOWS (PLAYIT) AKTIF</b>`n`n" +
+          $message = "<b>🖥 RDP WINDOWS (BORE) AKTIF</b>`n`n" +
                      "<b>OS:</b> $env:OS_NAME`n" +
                      "<b>PC Name / Host:</b> <code>$env:FULL</code>`n" +
                      "<b>Username:</b> <code>$env:USERNAME</code>`n" +
                      "<b>Password:</b> <code>$env:PASSWORD</code>`n`n" +
-                     "💡 <i>Langsung copas isi <b>PC Name</b> ke RD Client HP (tanpa VPN).</i>`n`n" +
+                     "💡 <i>Copas PC Name ke RD Client HP. (Jika mau pakai domain sendiri, buat CNAME <code>rdp</code> ke <code>bore.pub</code> lalu pakai format <code>rdp.domainmu.com:PORT</code>)</i>`n`n" +
                      "<b>🕹 Perintah Bot:</b>`n" +
                      "• <code>/status</code> - Cek status RDP`n" +
                      "• <code>/stop</code> - Matikan RDP"
@@ -164,7 +147,7 @@ jobs:
                       $uptime = (Get-Date) -$startTime
                       $hours = [math]::Floor($uptime.TotalHours)
                       $mins =$uptime.Minutes
-                      $reply = "🟢 <b>Status RDP:</b> Online (Playit.gg)`n⏰ <b>Uptime:</b> ${hours} jam ${mins} menit"
+                      $reply = "🟢 <b>Status RDP:</b> Online (Bore)`n⏰ <b>Uptime:</b> ${hours} jam ${mins} menit"
                       $body = @{ chat_id = $chatId; text = $reply; parse_mode = 'HTML' }
                       $null = Invoke-RestMethod -Uri("https://api.telegram.org/bot$env:BOT_TOKEN/sendMessage") -Method Post -Body $body
                     }
